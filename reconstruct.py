@@ -80,7 +80,7 @@ def combine_bands(
 
 def reconstruct_image(
     coeffs: List[CoeffTuple],
-    wavelet: str = "sym4",
+    wavelet: str = "haar",
 ) -> np.ndarray:
     """
     Wrapper around `swt_utils.swt2_reconstruct` that returns float32 image.

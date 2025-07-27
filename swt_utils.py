@@ -43,7 +43,7 @@ def _to_float32(img: np.ndarray) -> np.ndarray:
 
 def swt2_decompose(
     img: np.ndarray,
-    wavelet: str = "sym4",
+    wavelet: str = "haar",
     level: int = 2,
 ) -> List[CoeffTuple]:
     """
@@ -53,7 +53,7 @@ def swt2_decompose(
     ----------
     img : np.ndarray
         2‑D grayscale image (uint8, float32, …).
-    wavelet : str, default 'sym4'
+    wavelet : str, default 'haar'
         Any PyWavelets wavelet name. Symlets give good balance of symmetry
         and orthogonality for scratch‑like edges.
     level : int, default 2
@@ -75,7 +75,7 @@ def swt2_decompose(
 
 def swt2_reconstruct(
     coeffs: List[CoeffTuple],
-    wavelet: str = "sym4",
+    wavelet: str = "haar",
 ) -> np.ndarray:
     """
     Inverse 2‑D SWT (ISWT) reconstruction.
@@ -84,7 +84,7 @@ def swt2_reconstruct(
     ----------
     coeffs : list of tuples
         Output of `swt2_decompose`.
-    wavelet : str, default 'sym4'
+    wavelet : str, default 'haar'
         Wavelet family used during decomposition.
 
     Returns

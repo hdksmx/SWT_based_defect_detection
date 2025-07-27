@@ -32,11 +32,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wavelet", default="haar", help="Wavelet family (PyWavelets name).")
     p.add_argument("--level", type=int, default=2, help="Decomposition levels (>=1).")
     p.add_argument(
-        "-k", "--k", "--thr_factor",
+        "--k", "--thr_factor",
         dest="thr_factor",
         type=float,
         default=3.0,
-        help="Threshold factor T = k × σ̂. (aliases: -k, --k, --thr_factor)",
+        help="Threshold factor T = k × σ̂. (aliases: --k, --thr_factor)",
     )
     p.add_argument(
         "--thr_mode",
@@ -78,7 +78,7 @@ def main() -> None:
             except Exception as e:
                 print(f"[WARN] dwt_visualize failed: {e}")
 
-    # 2. SWT decompose
+    # 2. SWT decomposition
     with io.step_timer("swt_decompose"):
         coeffs = swt.swt2_decompose(img, wavelet=args.wavelet, level=args.level)
 
@@ -106,7 +106,8 @@ def main() -> None:
     with io.step_timer("reconstruct"):
         denoised = rc.reconstruct_image(coeffs_comb, wavelet=args.wavelet)
         out_path = io.save_image(denoised, "denoised.png")
-        print(f"Saved denoised image: {out_path.relative_to(io.RESULTS_DIR.parent)}")
+
+    print(f"Saved denoised image: {out_path.relative_to(io.RESULTS_DIR.parent)}")
 
     # 7. (Optional) scratch mask
     if args.save_mask:
@@ -116,7 +117,7 @@ def main() -> None:
             print(f"Saved mask: {mask_path.relative_to(io.RESULTS_DIR.parent)}")
 
     # 8. Timing summary
-    io.summary()
+    # io.summary()
 
     # 9. Write run log
     param_lines = [f"{k}: {v}" for k, v in vars(args).items()]

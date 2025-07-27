@@ -162,7 +162,7 @@ def step_timer(label: str):
     _TIMINGS[label] = _TIMINGS.get(label, 0.0) + dt
     print(f"[TIMING] {label:<20}: {dt*1000:8.2f} ms")
 
-
+'''
 def summary() -> None:
     """Pretty‑print timing results collected so far."""
     if not _TIMINGS:
@@ -175,7 +175,7 @@ def summary() -> None:
         total += v
         print(f"{k:<25}: {v:8.4f} s")
     print(f"{'-'*25}\nTotal{'':<20}: {total:8.4f} s\n")
-
+'''
 
 def reset_timings() -> None:
     """Erase all stored timing information (useful for tests)."""
