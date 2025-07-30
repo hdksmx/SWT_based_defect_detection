@@ -71,7 +71,14 @@ class PipelineConfig:
         'median': {'ksize': 3},
         'gaussian': {'ksize': 3, 'sigma': 1.0},
         'sobel': {'ksize': 3, 'normalize': True},
-        'laplacian': {'ksize': 3, 'normalize': True}
+        'laplacian': {'ksize': 3, 'normalize': True},
+        'blob_removal': {
+            's_med': 3.0 / 255.0,
+            's_avg': 20.0 / 255.0,
+            'gauss_sigma': 1.0,
+            'median_width': 5,
+            'lr_width': 3
+        }
     })
     
     # Legacy prefilter parameters (for backward compatibility)
@@ -171,18 +178,9 @@ def run(img_path: str | Path, cfg: PipelineConfig | None = None) -> PipelineResu
     # 1. Load image
     img_u8 = read_image(img_path, as_gray=True)
 
-    # 2. Prefilter chain
-    # Update prefilter_params with legacy parameters for backward compatibility
-    updated_params = cfg.prefilter_params.copy()
-    if 'median' in cfg.prefilter_chain:
-        updated_params['median']['ksize'] = cfg.median_kernel
-    if 'sobel' in cfg.prefilter_chain:
-        updated_params['sobel']['ksize'] = cfg.sobel_kernel
-    
-    grad_f32 = apply_filter_chain(
-        img_u8, 
-        filter_chain=cfg.prefilter_chain,
-        filter_params=updated_params
+    # 2. Prefilter - temporarily use legacy function for debugging
+    grad_f32 = median_then_sobel(
+        img_u8, ksize=cfg.median_kernel, sobel_ksize=cfg.sobel_kernel
     )
 
     

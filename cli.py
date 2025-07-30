@@ -56,7 +56,14 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
             'sigma': args.gaussian_sigma
         },
         'sobel': {'ksize': args.sobel_ksize, 'normalize': True},
-        'laplacian': {'ksize': args.laplacian_ksize, 'normalize': True}
+        'laplacian': {'ksize': args.laplacian_ksize, 'normalize': True},
+        'blob_removal': {
+            's_med': args.blob_s_med,
+            's_avg': args.blob_s_avg,
+            'gauss_sigma': args.blob_gauss_sigma,
+            'median_width': args.blob_median_width,
+            'lr_width': args.blob_lr_width
+        }
     }
     
     cfg = PipelineConfig(
@@ -129,7 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefilter_chain",
         nargs='+',
         default=['median', 'sobel'],
-        choices=['clahe', 'median', 'gaussian', 'sobel', 'laplacian'],
+        choices=['clahe', 'median', 'gaussian', 'sobel', 'laplacian', 'blob_removal'],
         help="Prefilter chain to apply in order (default: median sobel)."
     )
     
@@ -159,6 +166,38 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Gaussian kernel standard deviation (default: 1.0)."
+    )
+    
+    # Blob removal parameters
+    p_ins.add_argument(
+        "--blob_s_med",
+        type=float,
+        default=3.0 / 255.0,
+        help="Valley condition threshold for blob removal (default: 0.0118)."
+    )
+    p_ins.add_argument(
+        "--blob_s_avg",
+        type=float,
+        default=20.0 / 255.0,
+        help="Symmetry condition threshold for blob removal (default: 0.0784)."
+    )
+    p_ins.add_argument(
+        "--blob_gauss_sigma",
+        type=float,
+        default=1.0,
+        help="Gaussian sigma for blob removal valley condition (default: 1.0)."
+    )
+    p_ins.add_argument(
+        "--blob_median_width",
+        type=int,
+        default=5,
+        help="Horizontal median filter width for blob removal (default: 5)."
+    )
+    p_ins.add_argument(
+        "--blob_lr_width",
+        type=int,
+        default=3,
+        help="Left/right mean window width for blob removal (default: 3)."
     )
     p_ins.add_argument(
         "--std_factor",

@@ -99,7 +99,7 @@ Use `matplotlib` for colour‑mapped PNGs; save in `results/YYYYMMDD_HHMMSS/`.
 
 ---
 
-### Final note for Gemini 🤖  
+### Final note for Claude 🤖  
 **Your objective:** implement modules so that `python -m wafer_wtms.cli --img my_wafer.bmp` runs end‑to‑end and produces `results/…/08_defect_overlay.png` identical to the reference.  
 
 Stick to the contracts & coding style above, prefer clear logic over micro‑optimisation, and write self‑explanatory code—developers after you will port the heavy parts to Vivado HLS.

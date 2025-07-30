@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+from scipy.ndimage import median_filter, uniform_filter1d
 
 from io_utils import timer
 
@@ -43,6 +44,7 @@ __all__ = [
     "apply_gaussian",
     "apply_sobel",
     "apply_laplacian",
+    "apply_blob_removal",
     "apply_filter_chain",
     "median_then_sobel",  # backward compatibility
 ]
@@ -239,6 +241,116 @@ def apply_laplacian(
     return magnitude.astype(np.float32)
 
 
+def _left_right_means(img: np.ndarray, width: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Mean of *width* pixels immediately to the left / right of each pixel.
+
+    For example, for width=3 and pixel (x,y) the *left* mean is
+    the average of {x-3, x-2, x-1} while the *right* mean is the
+    average of {x+1, x+2, x+3}.
+
+    Implementation uses a centred uniform filter followed by an integer
+    roll (shift) so we never rely on ``origin`` values that exceed the
+    SciPy limit.
+
+    Parameters
+    ----------
+    img : np.ndarray, float32 in [0,1]
+    width : int, default=3
+        Number of neighbouring pixels to average (must be ≥1).
+
+    Returns
+    -------
+    left_mean, right_mean : np.ndarray – same shape as *img*
+    """
+    if width < 1:
+        raise ValueError("width must be ≥ 1")
+
+    # Centred moving‑average
+    centred = uniform_filter1d(img, size=width, axis=1, mode="nearest")
+
+    half = (width + 1) // 2  # integer shift
+    # left: shift kernel centre to the RIGHT  → looks backwards
+    left_mean = np.roll(centred, +half, axis=1)
+    # right: shift centre to the LEFT → looks forwards
+    right_mean = np.roll(centred, -half, axis=1)
+
+    return left_mean, right_mean
+
+
+@timer
+def apply_blob_removal(
+    img: np.ndarray,
+    s_med: float = 3.0 / 255.0,
+    s_avg: float = 20.0 / 255.0,
+    gauss_sigma: float = 1.0,
+    median_width: int = 5,
+    lr_width: int = 3,
+) -> np.ndarray:
+    """
+    Apply blob removal using valley & symmetry conditions.
+    
+    Removes thick blob-like artifacts while preserving scratch-like structures.
+    Uses two conditions:
+    - Valley condition: |I_g - I_m| >= s_med (Gaussian blur vs horizontal median)
+    - Symmetry condition: |L3 - R3| <= s_avg (left vs right pixel means)
+    
+    Pixels satisfying both conditions are preserved, others are removed.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        8-bit grayscale input image (H×W).
+    s_med : float, default=3/255
+        Threshold for valley condition |I_g - I_m|.
+    s_avg : float, default=20/255
+        Threshold for symmetry condition |L3 - R3|.
+    gauss_sigma : float, default=1.0
+        Standard deviation for Gaussian blur.
+    median_width : int, default=5
+        Width of horizontal median filter (must be odd).
+    lr_width : int, default=3
+        Width for left/right mean windows.
+    
+    Returns
+    -------
+    np.ndarray
+        8-bit image with blobs removed (uint8).
+    """
+    _validate_input(img)
+    
+    if median_width % 2 == 0:
+        raise ValueError("median_width must be odd")
+    if lr_width < 1:
+        raise ValueError("lr_width must be ≥ 1")
+    
+    # Convert to float32 for processing
+    img_f32 = img.astype(np.float32) / 255.0
+    
+    # I_g: Gaussian blur
+    I_g = cv2.GaussianBlur(img_f32, ksize=(0, 0), sigmaX=gauss_sigma, borderType=cv2.BORDER_REPLICATE)
+    
+    # I_m: horizontal median
+    I_m = median_filter(img_f32, size=(1, median_width), mode="nearest")
+    
+    # Left/right means
+    L3, R3 = _left_right_means(img_f32, width=lr_width)
+    
+    # Valley & symmetry conditions
+    c1 = np.abs(I_g - I_m) >= s_med  # Valley condition
+    c2 = np.abs(L3 - R3) <= s_avg    # Symmetry condition
+    
+    # Keep pixels that satisfy both conditions (likely scratches)
+    # Remove pixels that don't satisfy both conditions (likely blobs)
+    mask = np.logical_and(c1, c2)
+    
+    # Apply mask to original image
+    result = img.copy()
+    result[~mask] = 0  # Remove blob pixels by setting to black
+    
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Filter chain system
 # --------------------------------------------------------------------------- #
@@ -248,6 +360,7 @@ AVAILABLE_FILTERS = {
     'gaussian': apply_gaussian, 
     'sobel': apply_sobel,
     'laplacian': apply_laplacian,
+    'blob_removal': apply_blob_removal,
 }
 
 
