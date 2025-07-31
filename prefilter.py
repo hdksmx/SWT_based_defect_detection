@@ -45,6 +45,7 @@ __all__ = [
     "apply_sobel",
     "apply_laplacian",
     "apply_blob_removal",
+    "apply_glcm_texture_filter",
     "apply_filter_chain",
     "median_then_sobel",  # backward compatibility
 ]
@@ -323,6 +324,241 @@ def _fallback_background(
     return img[y, x]
 
 
+def _compute_glcm_homogeneity(
+    window: np.ndarray,
+    distance: int = 1,
+    angle: int = 0,
+    levels: int = 32
+) -> float:
+    """
+    Compute GLCM homogeneity for a single window.
+    
+    Homogeneity measures the uniformity of texture by computing:
+    Σ P(i,j) / (1 + |i-j|)
+    
+    where P(i,j) is the normalized GLCM matrix.
+    Higher values indicate more homogeneous (uniform) texture.
+    
+    Parameters
+    ----------
+    window : np.ndarray
+        Input window (typically 11×11) with values in [0,255].
+    distance : int, default=1
+        Pixel distance for co-occurrence calculation.
+    angle : int, default=0
+        Angle in degrees (0, 45, 90, 135). 0 = horizontal.
+    levels : int, default=32
+        Number of gray levels for quantization (reduced for speed).
+        
+    Returns
+    -------
+    float
+        Homogeneity value in [0,1]. Higher = more homogeneous.
+    """
+    h, w = window.shape
+    
+    # Quantize to reduce gray levels for computational efficiency
+    quantized = (window * (levels - 1) / 255.0).astype(np.int32)
+    quantized = np.clip(quantized, 0, levels - 1)
+    
+    # Initialize GLCM matrix
+    glcm = np.zeros((levels, levels), dtype=np.int32)
+    
+    # Compute co-occurrence pairs based on angle
+    if angle == 0:  # Horizontal (0°)
+        for r in range(h):
+            for c in range(w - distance):
+                i, j = quantized[r, c], quantized[r, c + distance]
+                glcm[i, j] += 1
+                glcm[j, i] += 1  # Symmetric
+                
+    elif angle == 45:  # Diagonal (45°)
+        for r in range(h - distance):
+            for c in range(w - distance):
+                i, j = quantized[r, c], quantized[r + distance, c + distance]
+                glcm[i, j] += 1
+                glcm[j, i] += 1
+                
+    elif angle == 90:  # Vertical (90°)
+        for r in range(h - distance):
+            for c in range(w):
+                i, j = quantized[r, c], quantized[r + distance, c]
+                glcm[i, j] += 1
+                glcm[j, i] += 1
+                
+    elif angle == 135:  # Anti-diagonal (135°)
+        for r in range(h - distance):
+            for c in range(distance, w):
+                i, j = quantized[r, c], quantized[r + distance, c - distance]
+                glcm[i, j] += 1
+                glcm[j, i] += 1
+    else:
+        raise ValueError("angle must be one of {0, 45, 90, 135}")
+    
+    # Normalize GLCM
+    total_pairs = glcm.sum()
+    if total_pairs == 0:
+        return 0.0
+    
+    glcm_normalized = glcm.astype(np.float32) / total_pairs
+    
+    # Compute homogeneity
+    homogeneity = 0.0
+    for i in range(levels):
+        for j in range(levels):
+            if glcm_normalized[i, j] > 0:
+                homogeneity += glcm_normalized[i, j] / (1.0 + abs(i - j))
+    
+    return homogeneity
+
+
+def _fast_glcm_homogeneity_map(
+    img: np.ndarray,
+    window_size: int = 11,
+    distance: int = 1,
+    angle: int = 0,
+    levels: int = 32
+) -> np.ndarray:
+    """
+    Compute GLCM homogeneity map for entire image using sliding window.
+    
+    For each pixel, computes the homogeneity of the surrounding window.
+    Border pixels use reflected padding.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image (uint8, single channel).
+    window_size : int, default=11
+        Size of sliding window (must be odd).
+    distance : int, default=1
+        Distance for GLCM computation.
+    angle : int, default=0
+        Angle for GLCM computation (0, 45, 90, 135).
+    levels : int, default=32
+        Number of gray levels for quantization.
+        
+    Returns
+    -------
+    np.ndarray
+        Homogeneity map (float32) with same shape as input.
+        Values in [0,1] where higher = more homogeneous.
+    """
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be odd")
+    
+    h, w = img.shape
+    half_win = window_size // 2
+    homogeneity_map = np.zeros((h, w), dtype=np.float32)
+    
+    # Use reflection padding to handle borders
+    padded_img = np.pad(
+        img, 
+        pad_width=half_win, 
+        mode='reflect'
+    )
+    
+    # Compute homogeneity for each position
+    for y in range(h):
+        for x in range(w):
+            # Extract window from padded image
+            window = padded_img[
+                y:y + window_size,
+                x:x + window_size
+            ]
+            
+            # Compute homogeneity for this window
+            homogeneity_map[y, x] = _compute_glcm_homogeneity(
+                window, distance, angle, levels
+            )
+    
+    return homogeneity_map
+
+
+@timer
+def apply_glcm_texture_filter(
+    img: np.ndarray,
+    homogeneity_threshold: float = 0.6,
+    smoothing_sigma: float = 1.5,
+    window_size: int = 11,
+    distance: int = 1,
+    angle: int = 0,
+    levels: int = 32,
+    blend_range: tuple[float, float] = (0.3, 0.8)
+) -> np.ndarray:
+    """
+    Apply texture-aware filtering based on GLCM homogeneity.
+    
+    Regions with high homogeneity (uniform texture/background) are smoothed
+    to reduce noise, while regions with low homogeneity (potential defects)
+    are preserved to maintain detail.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        8-bit grayscale input image (H×W).
+    homogeneity_threshold : float, default=0.6
+        Threshold for determining homogeneous regions.
+        Higher values = more selective smoothing.
+    smoothing_sigma : float, default=1.5
+        Standard deviation for Gaussian smoothing.
+    window_size : int, default=11
+        Size of window for GLCM computation (must be odd).
+    distance : int, default=1
+        Distance for GLCM co-occurrence.
+    angle : int, default=0
+        Angle for GLCM (0=horizontal, useful for scratch detection).
+    levels : int, default=32
+        Gray levels for GLCM quantization.
+    blend_range : tuple[float, float], default=(0.3, 0.8)
+        Range for soft blending (min_homogeneity, max_homogeneity).
+        
+    Returns
+    -------
+    np.ndarray
+        8-bit filtered image with texture-aware smoothing applied.
+    """
+    _validate_input(img)
+    
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be odd")
+    if not (0.0 <= homogeneity_threshold <= 1.0):
+        raise ValueError("homogeneity_threshold must be in [0,1]")
+    if blend_range[0] >= blend_range[1]:
+        raise ValueError("blend_range[0] must be < blend_range[1]")
+    
+    # 1. Compute homogeneity map
+    homogeneity_map = _fast_glcm_homogeneity_map(
+        img, window_size, distance, angle, levels
+    )
+    
+    # 2. Apply Gaussian smoothing to entire image
+    smoothed_img = cv2.GaussianBlur(
+        img,
+        ksize=(0, 0),
+        sigmaX=smoothing_sigma,
+        borderType=cv2.BORDER_REFLECT
+    )
+    
+    # 3. Create soft blending weights based on homogeneity
+    # Linear interpolation between blend_range
+    min_hom, max_hom = blend_range
+    alpha = np.clip(
+        (homogeneity_map - min_hom) / (max_hom - min_hom),
+        0.0, 1.0
+    )
+    
+    # 4. Blend original and smoothed images
+    # alpha=0 → keep original (low homogeneity, potential defects)
+    # alpha=1 → use smoothed (high homogeneity, background)
+    result = (
+        alpha[..., np.newaxis] * smoothed_img[..., np.newaxis] +
+        (1 - alpha[..., np.newaxis]) * img[..., np.newaxis]
+    ).squeeze().astype(np.uint8)
+    
+    return result
+
+
 def _estimate_local_background(
     img: np.ndarray, 
     blob_mask: np.ndarray, 
@@ -516,6 +752,110 @@ def apply_blob_removal(
     return result
 
 
+def auto_tune_glcm_params(
+    img: np.ndarray,
+    base_config: dict | None = None
+) -> dict:
+    """
+    Auto-tune GLCM texture filter parameters based on image characteristics.
+    
+    Analyzes image statistics to adjust parameters for optimal performance:
+    - High noise → larger window, stronger smoothing
+    - Low contrast → lower threshold, more aggressive smoothing
+    - High texture density → smaller window, more selective smoothing
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image for analysis (uint8).
+    base_config : dict, optional
+        Base configuration to modify. If None, uses defaults.
+        
+    Returns
+    -------
+    dict
+        Optimized parameters for apply_glcm_texture_filter.
+    """
+    # Default parameters
+    params = {
+        'homogeneity_threshold': 0.6,
+        'smoothing_sigma': 1.5,
+        'window_size': 11,
+        'distance': 1,
+        'angle': 0,
+        'levels': 32,
+        'blend_range': (0.3, 0.8)
+    }
+    
+    # Override with base config if provided
+    if base_config:
+        params.update(base_config)
+    
+    # Estimate image characteristics
+    mean_intensity = np.mean(img)
+    std_intensity = np.std(img)
+    
+    # Estimate noise level using Laplacian method
+    laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
+    noise_level = laplacian_var / (255.0 ** 2)  # Normalize
+    
+    # Estimate local contrast variation
+    local_std = cv2.GaussianBlur(
+        (img.astype(np.float32) - mean_intensity) ** 2,
+        ksize=(5, 5),
+        sigmaX=1.0
+    )
+    contrast_variation = np.sqrt(local_std).mean() / 255.0
+    
+    # Adaptive parameter adjustment
+    
+    # 1. Noise-based adjustments
+    if noise_level > 0.01:  # High noise
+        params['window_size'] = 15  # Larger window for better statistics
+        params['smoothing_sigma'] = 2.0  # Stronger smoothing
+        params['levels'] = 16  # Fewer levels for noise robustness
+        
+    elif noise_level < 0.001:  # Very low noise
+        params['window_size'] = 9  # Smaller window for better locality
+        params['smoothing_sigma'] = 1.0  # Gentler smoothing
+    
+    # 2. Contrast-based adjustments
+    if contrast_variation < 0.05:  # Low contrast
+        params['homogeneity_threshold'] = 0.5  # More aggressive smoothing
+        params['blend_range'] = (0.2, 0.7)  # Wider blending range
+        
+    elif contrast_variation > 0.15:  # High contrast
+        params['homogeneity_threshold'] = 0.7  # More selective smoothing
+        params['blend_range'] = (0.4, 0.9)  # Narrower blending range
+    
+    # 3. Intensity-based adjustments
+    if mean_intensity < 50:  # Dark images
+        params['levels'] = 16  # Fewer levels for dark regions
+        
+    elif mean_intensity > 200:  # Bright images
+        params['levels'] = 48  # More levels for bright regions
+    
+    # 4. Ensure parameter validity
+    params['window_size'] = max(7, params['window_size'])
+    if params['window_size'] % 2 == 0:
+        params['window_size'] += 1  # Ensure odd
+        
+    params['homogeneity_threshold'] = np.clip(
+        params['homogeneity_threshold'], 0.1, 0.9
+    )
+    params['smoothing_sigma'] = np.clip(
+        params['smoothing_sigma'], 0.5, 3.0
+    )
+    params['levels'] = np.clip(params['levels'], 8, 64)
+    
+    # Ensure blend_range is valid
+    min_blend, max_blend = params['blend_range']
+    if min_blend >= max_blend:
+        params['blend_range'] = (0.3, 0.8)  # Reset to default
+    
+    return params
+
+
 # --------------------------------------------------------------------------- #
 # Filter chain system
 # --------------------------------------------------------------------------- #
@@ -526,6 +866,7 @@ AVAILABLE_FILTERS = {
     'sobel': apply_sobel,
     'laplacian': apply_laplacian,
     'blob_removal': apply_blob_removal,
+    'glcm_texture': apply_glcm_texture_filter,
 }
 
 
