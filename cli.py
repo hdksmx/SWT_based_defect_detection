@@ -45,6 +45,12 @@ python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_f
 
 # 13) Multi-scale GLCM with optimizations for large images
 python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multiscale sobel --glcm_optimize --glcm_multiscale_scales 9 13 17
+
+# 14) GLCM debugging - see all intermediate results
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_feature sobel --debug --glcm_features homogeneity contrast energy
+
+# 15) Multi-scale GLCM with full debugging output
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multiscale sobel --debug --glcm_multiscale_scales 7 11 15
 """
 
 from __future__ import annotations
@@ -62,7 +68,7 @@ from pipeline import PipelineConfig, PipelineResult, run as run_pipeline
 
 
 def _cmd_inspect(args: argparse.Namespace) -> None:
-    # Build prefilter parameters from CLI arguments
+    # Build base prefilter parameters (non-GLCM filters)
     prefilter_params = {
         'clahe': {
             'clip_limit': args.clahe_clip_limit,
@@ -82,41 +88,6 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
             'median_width': args.blob_median_width,
             'lr_width': args.blob_lr_width,
             'use_glcm_texture': args.blob_use_glcm_texture
-        },
-        # GLCM filter parameters
-        'glcm_texture': {
-            'window_size': args.glcm_window_size,
-            'levels': args.glcm_levels,
-            'smoothing_sigma': args.glcm_smoothing_sigma,
-            'distance': args.glcm_distances[0] if args.glcm_distances else 1,
-            'angle': args.glcm_angles[0] if args.glcm_angles else 0
-        },
-        'glcm_multi_feature': {
-            'window_size': args.glcm_window_size,
-            'distances': args.glcm_distances,
-            'angles': args.glcm_angles,
-            'levels': args.glcm_levels,
-            'features': args.glcm_features,
-            'combination_strategy': args.glcm_combination_strategy,
-            'smoothing_sigma': args.glcm_smoothing_sigma,
-            'use_optimization': args.glcm_optimize
-        },
-        'glcm_multiscale': {
-            'scales': args.glcm_multiscale_scales,
-            'features': args.glcm_features,
-            'fusion_strategy': args.glcm_multiscale_fusion,
-            'distances': args.glcm_distances,
-            'angles': args.glcm_angles,
-            'levels': args.glcm_levels,
-            'combination_strategy': args.glcm_combination_strategy,
-            'smoothing_sigma': args.glcm_smoothing_sigma,
-            'use_optimization': args.glcm_optimize
-        },
-        'glcm_blob_removal': {
-            'preserve_scratches': True,
-            'scratch_threshold': 0.4,
-            'window_size': args.glcm_window_size,
-            'smoothing_sigma': args.glcm_smoothing_sigma
         }
     }
     
@@ -135,6 +106,19 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
         ecc_thr=args.ecc_thr,
         len_thr=args.len_thr,
         gs_csv=Path(args.gs) if args.gs else None,
+        # GLCM parameters - passed directly to PipelineConfig fields
+        use_glcm_optimization=args.glcm_optimize,
+        glcm_window_size=args.glcm_window_size,
+        glcm_levels=args.glcm_levels,
+        glcm_distances=args.glcm_distances,
+        glcm_angles=args.glcm_angles,
+        glcm_features=args.glcm_features,
+        glcm_combination_strategy=args.glcm_combination_strategy,
+        glcm_smoothing_sigma=args.glcm_smoothing_sigma,
+        glcm_multiscale_scales=args.glcm_multiscale_scales,
+        glcm_multiscale_fusion=args.glcm_multiscale_fusion,
+        # Debugging options
+        enable_debug_output=args.debug,
     )
     result: PipelineResult = run_pipeline(args.img, cfg)
 
@@ -324,6 +308,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--glcm_optimize",
         action="store_true",
         help="Enable GLCM performance optimizations (LUT caching and vectorization)."
+    )
+    p_ins.add_argument(
+        "--debug", 
+        action="store_true",
+        help="Enable detailed debugging output including GLCM intermediate results."
     )
     
     p_ins.add_argument(

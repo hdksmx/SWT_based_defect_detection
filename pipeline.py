@@ -103,6 +103,93 @@ class PipelineConfig:
     min_region_area: int = 5
     ecc_thr: float = 0.9
     len_thr: float = 20
+    
+    # GLCM parameters
+    use_glcm_optimization: bool = False
+    glcm_window_size: int = 11
+    glcm_levels: int = 32
+    glcm_distances: List[int] = field(default_factory=lambda: [1, 2])
+    glcm_angles: List[int] = field(default_factory=lambda: [0, 45, 90, 135])
+    glcm_features: List[str] = field(default_factory=lambda: ['homogeneity', 'contrast', 'energy', 'correlation'])
+    glcm_combination_strategy: str = 'scratch_optimized'
+    glcm_smoothing_sigma: float = 1.5
+    glcm_multiscale_scales: List[int] = field(default_factory=lambda: [7, 11, 15])
+    glcm_multiscale_fusion: str = 'weighted_average'
+    
+    # Debugging options
+    enable_debug_output: bool = False
+    
+    def build_prefilter_params(self) -> Dict[str, Dict]:
+        """
+        Build complete prefilter parameters including GLCM parameters.
+        
+        Dynamically constructs filter parameters from PipelineConfig fields,
+        ensuring all GLCM settings are properly passed to filter functions.
+        
+        Returns
+        -------
+        Dict[str, Dict]
+            Complete parameter dictionary for all filters in the chain.
+        """
+        # Start with base prefilter params
+        params = self.prefilter_params.copy()
+        
+        # Add GLCM filter parameters
+        params.update({
+            'glcm_texture': {
+                'window_size': self.glcm_window_size,
+                'levels': self.glcm_levels,
+                'smoothing_sigma': self.glcm_smoothing_sigma,
+                'distance': self.glcm_distances[0] if self.glcm_distances else 1,
+                'angle': self.glcm_angles[0] if self.glcm_angles else 0,
+                'save_debug_images': self.enable_debug_output
+            },
+            'glcm_multi_feature': {
+                'window_size': self.glcm_window_size,
+                'distances': self.glcm_distances,
+                'angles': self.glcm_angles,
+                'levels': self.glcm_levels,
+                'features': self.glcm_features,
+                'combination_strategy': self.glcm_combination_strategy,
+                'smoothing_sigma': self.glcm_smoothing_sigma,
+                'use_optimization': self.use_glcm_optimization,
+                'save_debug_images': self.enable_debug_output
+            },
+            'glcm_multiscale': {
+                'scales': self.glcm_multiscale_scales,
+                'features': self.glcm_features,
+                'fusion_strategy': self.glcm_multiscale_fusion,
+                'distances': self.glcm_distances,
+                'angles': self.glcm_angles,
+                'levels': self.glcm_levels,
+                'combination_strategy': self.glcm_combination_strategy,
+                'smoothing_sigma': self.glcm_smoothing_sigma,
+                'use_optimization': self.use_glcm_optimization,
+                'save_debug_images': self.enable_debug_output
+            },
+            'glcm_blob_removal': {
+                'preserve_scratches': True,
+                'scratch_threshold': 0.4,
+                'window_size': self.glcm_window_size,
+                'smoothing_sigma': self.glcm_smoothing_sigma,
+                'use_optimization': self.use_glcm_optimization,
+                'save_debug_images': self.enable_debug_output
+            }
+        })
+        
+        # Update blob_removal with GLCM integration settings
+        if 'blob_removal' in params:
+            params['blob_removal'].update({
+                'use_glcm_texture': any('glcm' in filter_name for filter_name in self.prefilter_chain),
+                'glcm_params': {
+                    'window_size': self.glcm_window_size,
+                    'smoothing_sigma': self.glcm_smoothing_sigma,
+                    'preserve_scratches': True,
+                    'scratch_threshold': 0.4
+                }
+            })
+        
+        return params
 
 
 @dataclass(slots=True)
@@ -178,9 +265,11 @@ def run(img_path: str | Path, cfg: PipelineConfig | None = None) -> PipelineResu
     # 1. Load image
     img_u8 = read_image(img_path, as_gray=True)
 
-    # 2. Prefilter - temporarily use legacy function for debugging
-    grad_f32 = median_then_sobel(
-        img_u8, ksize=cfg.median_kernel, sobel_ksize=cfg.sobel_kernel
+    # 2. Prefilter - use filter chain system with GLCM support
+    grad_f32 = apply_filter_chain(
+        img_u8,
+        filter_chain=cfg.prefilter_chain,
+        filter_params=cfg.build_prefilter_params()
     )
 
     
@@ -189,8 +278,31 @@ def run(img_path: str | Path, cfg: PipelineConfig | None = None) -> PipelineResu
     save_path = debug_path(1, "prefilter")
     save_image(grad_f32, save_path)
     debug_files["prefilter"] = save_path
+    
+    # 2‑C. Add GLCM debug files if debugging enabled and GLCM filters used
+    if cfg.enable_debug_output and any('glcm' in f for f in cfg.prefilter_chain):
+        glcm_features = cfg.glcm_features
+        debug_counter = 1
+        
+        # Individual feature maps
+        for feature_name in glcm_features:
+            debug_files[f"glcm_{feature_name}"] = debug_path(1, f"{debug_counter}_glcm_{feature_name}")
+            debug_counter += 1
+        
+        # Combined texture score and other intermediate results
+        debug_files["glcm_combined_score"] = debug_path(1, "5_glcm_combined_score")
+        debug_files["glcm_smoothed"] = debug_path(1, "6_glcm_smoothed")
+        debug_files["glcm_alpha_blend"] = debug_path(1, "7_glcm_alpha_blend")
+        debug_files["glcm_final_result"] = debug_path(1, "8_glcm_final_result")
+        
+        # Multi-scale specific debug files
+        if 'glcm_multiscale' in cfg.prefilter_chain:
+            scales = cfg.glcm_multiscale_scales
+            for i, scale in enumerate(scales):
+                debug_files[f"glcm_scale_{scale}x{scale}"] = debug_path(1, f"2{i+1}_glcm_scale_{scale}x{scale}")
+            debug_files["glcm_multiscale_fused"] = debug_path(1, "25_glcm_multiscale_fused")
 
-    # 2‑C. Quad‑view of 1‑level DWT for quick inspection
+    # 2‑D. Quad‑view of 1‑level DWT for quick inspection
     grad_float = grad_f32  # Already normalized to [0,1] range
     quad_img = dwt_quad(grad_float, wavelet=cfg.wavelet_name)
     quad_path = debug_path(0, "dwt_quad")

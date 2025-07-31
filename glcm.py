@@ -43,7 +43,7 @@ from scipy.ndimage import median_filter, uniform_filter1d
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from io_utils import timer
+from io_utils import timer, debug_path, save_image
 
 # --------------------------------------------------------------------------- #
 # Performance optimization: Global LUT cache
@@ -506,7 +506,8 @@ def apply_glcm_texture_filter(
     distance: int = 1,
     angle: int = 0,
     levels: int = 32,
-    blend_range: tuple[float, float] = (0.3, 0.8)
+    blend_range: tuple[float, float] = (0.3, 0.8),
+    save_debug_images: bool = False
 ) -> np.ndarray:
     """
     Apply texture-aware filtering based on GLCM homogeneity (legacy function).
@@ -552,6 +553,12 @@ def apply_glcm_texture_filter(
         img, window_size, distance, angle, levels
     )
     
+    # Debug: Save homogeneity map
+    if save_debug_images:
+        hom_normalized = (homogeneity_map * 255).astype(np.uint8)
+        hom_debug = debug_path(1, "1_glcm_homogeneity")
+        save_image(hom_normalized, hom_debug)
+    
     # 2. Apply Gaussian smoothing to entire image
     smoothed_img = cv2.GaussianBlur(
         img,
@@ -572,6 +579,11 @@ def apply_glcm_texture_filter(
         alpha[..., np.newaxis] * smoothed_img[..., np.newaxis] +
         (1 - alpha[..., np.newaxis]) * img[..., np.newaxis]
     ).squeeze().astype(np.uint8)
+    
+    # Debug: Save final result
+    if save_debug_images:
+        result_debug = debug_path(1, "8_glcm_texture_result")
+        save_image(result, result_debug)
     
     return result
 
@@ -1030,7 +1042,8 @@ def apply_multi_feature_glcm_filter(
     feature_weights: dict[str, float] = None,
     smoothing_sigma: float = 1.5,
     blend_range: tuple[float, float] = (0.3, 0.8),
-    use_optimization: bool = False
+    use_optimization: bool = False,
+    save_debug_images: bool = False
 ) -> np.ndarray:
     """
     Apply advanced multi-feature GLCM texture filtering.
@@ -1077,6 +1090,19 @@ def apply_multi_feature_glcm_filter(
         img, window_size, distances, angles, levels, features, use_optimization
     )
     
+    # Debug: Save individual feature maps
+    if save_debug_images:
+        debug_counter = 1
+        for feature_name in features:
+            feature_key = f'{feature_name}_mean'
+            if feature_key in feature_maps:
+                feature_map = feature_maps[feature_key]
+                # Normalize to [0,255] for visualization
+                normalized = (feature_map * 255).astype(np.uint8)
+                debug_file = debug_path(1, f"{debug_counter}_glcm_{feature_name}")
+                save_image(normalized, debug_file)
+                debug_counter += 1
+    
     # 2. Combine features intelligently
     if combination_strategy == 'scratch_optimized':
         if feature_weights is None:
@@ -1101,6 +1127,12 @@ def apply_multi_feature_glcm_filter(
     else:
         raise ValueError(f"Unknown combination_strategy: {combination_strategy}")
     
+    # Debug: Save combined texture score
+    if save_debug_images:
+        score_normalized = (texture_score * 255).astype(np.uint8)
+        score_debug = debug_path(1, "5_glcm_combined_score")
+        save_image(score_normalized, score_debug)
+    
     # 3. Apply Gaussian smoothing
     smoothed_img = cv2.GaussianBlur(
         img,
@@ -1109,6 +1141,11 @@ def apply_multi_feature_glcm_filter(
         borderType=cv2.BORDER_REFLECT
     )
     
+    # Debug: Save smoothed image
+    if save_debug_images:
+        smoothed_debug = debug_path(1, "6_glcm_smoothed")
+        save_image(smoothed_img, smoothed_debug)
+    
     # 4. Create blending weights
     min_score, max_score = blend_range
     alpha = np.clip(
@@ -1116,11 +1153,22 @@ def apply_multi_feature_glcm_filter(
         0.0, 1.0
     )
     
+    # Debug: Save alpha blending weights
+    if save_debug_images:
+        alpha_normalized = (alpha * 255).astype(np.uint8)
+        alpha_debug = debug_path(1, "7_glcm_alpha_blend")
+        save_image(alpha_normalized, alpha_debug)
+    
     # 5. Blend original and smoothed images
     result = (
         alpha[..., np.newaxis] * smoothed_img[..., np.newaxis] +
         (1 - alpha[..., np.newaxis]) * img[..., np.newaxis]
     ).squeeze().astype(np.uint8)
+    
+    # Debug: Save final result
+    if save_debug_images:
+        result_debug = debug_path(1, "8_glcm_final_result")
+        save_image(result, result_debug)
     
     return result
 
@@ -1133,6 +1181,7 @@ def apply_multiscale_glcm_filter(
     fusion_strategy: Literal['weighted_average', 'adaptive_fusion'] = 'weighted_average',
     scale_weights: list[float] = None,
     use_optimization: bool = False,
+    save_debug_images: bool = False,
     **kwargs
 ) -> np.ndarray:
     """
@@ -1191,12 +1240,18 @@ def apply_multiscale_glcm_filter(
             'features': features,
             'combination_strategy': 'scratch_optimized',
             'use_optimization': use_optimization,
+            'save_debug_images': False,  # Disable debug for individual scales to avoid clutter
             **kwargs
         }
         
         # Apply GLCM filtering at this scale
         scale_result = apply_multi_feature_glcm_filter(img, **scale_params)
         scale_results.append(scale_result)
+        
+        # Debug: Save individual scale results if debug enabled
+        if save_debug_images:
+            scale_debug = debug_path(1, f"2{i+1}_glcm_scale_{scale}x{scale}")
+            save_image(scale_result, scale_debug)
     
     # Fuse multi-scale results
     if fusion_strategy == 'weighted_average':
@@ -1207,6 +1262,11 @@ def apply_multiscale_glcm_filter(
         
     else:
         raise ValueError(f"Unknown fusion_strategy: {fusion_strategy}")
+    
+    # Debug: Save final multiscale result
+    if save_debug_images:
+        multiscale_debug = debug_path(1, "25_glcm_multiscale_fused")
+        save_image(fused_result, multiscale_debug)
     
     return fused_result
 
