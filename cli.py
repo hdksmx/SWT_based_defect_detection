@@ -27,6 +27,18 @@ python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain clahe median
 
 # 7) CLAHE만 적용 후 Sobel
 python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain clahe sobel --clahe_clip_limit 4.0 --clahe_tile_size 12
+
+# 8) GLCM multi-feature texture filtering
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_feature sobel --glcm_combination_strategy weighted_adaptive
+
+# 9) GLCM multi-scale analysis
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multiscale sobel --glcm_multiscale_scales 7 11 15 --glcm_multiscale_fusion adaptive_fusion
+
+# 10) Blob removal with GLCM texture filtering
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain blob_removal sobel --blob_use_glcm_texture --glcm_window_size 9
+
+# 11) PCA-based GLCM feature combination
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_feature sobel --glcm_combination_strategy pca_based --glcm_features homogeneity contrast energy correlation entropy
 """
 
 from __future__ import annotations
@@ -62,7 +74,41 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
             's_avg': args.blob_s_avg,
             'gauss_sigma': args.blob_gauss_sigma,
             'median_width': args.blob_median_width,
-            'lr_width': args.blob_lr_width
+            'lr_width': args.blob_lr_width,
+            'use_glcm_texture': args.blob_use_glcm_texture
+        },
+        # GLCM filter parameters
+        'glcm_texture': {
+            'window_size': args.glcm_window_size,
+            'levels': args.glcm_levels,
+            'smoothing_sigma': args.glcm_smoothing_sigma,
+            'distance': args.glcm_distances[0] if args.glcm_distances else 1,
+            'angle': args.glcm_angles[0] if args.glcm_angles else 0
+        },
+        'glcm_multi_feature': {
+            'window_size': args.glcm_window_size,
+            'distances': args.glcm_distances,
+            'angles': args.glcm_angles,
+            'levels': args.glcm_levels,
+            'features': args.glcm_features,
+            'combination_strategy': args.glcm_combination_strategy,
+            'smoothing_sigma': args.glcm_smoothing_sigma
+        },
+        'glcm_multiscale': {
+            'scales': args.glcm_multiscale_scales,
+            'features': args.glcm_features,
+            'fusion_strategy': args.glcm_multiscale_fusion,
+            'distances': args.glcm_distances,
+            'angles': args.glcm_angles,
+            'levels': args.glcm_levels,
+            'combination_strategy': args.glcm_combination_strategy,
+            'smoothing_sigma': args.glcm_smoothing_sigma
+        },
+        'glcm_blob_removal': {
+            'preserve_scratches': True,
+            'scratch_threshold': 0.4,
+            'window_size': args.glcm_window_size,
+            'smoothing_sigma': args.glcm_smoothing_sigma
         }
     }
     
@@ -136,8 +182,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefilter_chain",
         nargs='+',
         default=['median', 'sobel'],
-        choices=['clahe', 'median', 'gaussian', 'sobel', 'laplacian', 'blob_removal'],
-        help="Prefilter chain to apply in order (default: median sobel)."
+        choices=['clahe', 'median', 'gaussian', 'sobel', 'laplacian', 'blob_removal', 
+                'glcm_texture', 'glcm_multi_feature', 'glcm_multiscale', 'glcm_blob_removal'],
+        help="Prefilter chain to apply in order (default: median sobel). "
+             "GLCM options: glcm_texture, glcm_multi_feature, glcm_multiscale, glcm_blob_removal."
     )
     
     # CLAHE parameters
@@ -199,6 +247,72 @@ def _build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Left/right mean window width for blob removal (default: 3)."
     )
+    p_ins.add_argument(
+        "--blob_use_glcm_texture",
+        action="store_true",
+        help="Use GLCM texture filtering instead of Gaussian blur in blob removal."
+    )
+    
+    # GLCM parameters
+    p_ins.add_argument(
+        "--glcm_window_size",
+        type=int,
+        default=11,
+        help="GLCM sliding window size (default: 11)."
+    )
+    p_ins.add_argument(
+        "--glcm_levels",
+        type=int,
+        default=32,
+        help="Number of gray levels for GLCM quantization (default: 32)."
+    )
+    p_ins.add_argument(
+        "--glcm_features",
+        nargs='+',
+        default=['homogeneity', 'contrast', 'energy', 'correlation'],
+        choices=['homogeneity', 'contrast', 'energy', 'correlation', 'entropy', 'dissimilarity'],
+        help="GLCM features to compute (default: homogeneity contrast energy correlation)."
+    )
+    p_ins.add_argument(
+        "--glcm_combination_strategy",
+        choices=['scratch_optimized', 'weighted_adaptive', 'pca_based'],
+        default='scratch_optimized',
+        help="Strategy for combining GLCM features (default: scratch_optimized)."
+    )
+    p_ins.add_argument(
+        "--glcm_distances",
+        nargs='+',
+        type=int,
+        default=[1, 2],
+        help="GLCM pixel distances (default: 1 2)."
+    )
+    p_ins.add_argument(
+        "--glcm_angles",
+        nargs='+',
+        type=int,
+        default=[0, 45, 90, 135],
+        help="GLCM angles in degrees (default: 0 45 90 135)."
+    )
+    p_ins.add_argument(
+        "--glcm_smoothing_sigma", 
+        type=float,
+        default=1.5,
+        help="Gaussian smoothing sigma for GLCM filters (default: 1.5)."
+    )
+    p_ins.add_argument(
+        "--glcm_multiscale_scales",
+        nargs='+',
+        type=int,
+        default=[7, 11, 15],
+        help="Window sizes for multi-scale GLCM analysis (default: 7 11 15)."
+    )
+    p_ins.add_argument(
+        "--glcm_multiscale_fusion",
+        choices=['weighted_average', 'adaptive_fusion'],
+        default='weighted_average',
+        help="Multi-scale fusion strategy (default: weighted_average)."
+    )
+    
     p_ins.add_argument(
         "--std_factor",
         type=float,

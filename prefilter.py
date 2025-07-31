@@ -45,7 +45,6 @@ __all__ = [
     "apply_sobel",
     "apply_laplacian",
     "apply_blob_removal",
-    "apply_glcm_texture_filter",
     "apply_filter_chain",
     "median_then_sobel",  # backward compatibility
 ]
@@ -324,6 +323,11 @@ def _fallback_background(
     return img[y, x]
 
 
+# DEPRECATED: GLCM functions moved to glcm.py module
+# The following functions are kept for reference but should not be used.
+# Use glcm.py module instead.
+
+"""
 def _compute_glcm_homogeneity(
     window: np.ndarray,
     distance: int = 1,
@@ -668,18 +672,19 @@ def apply_blob_removal(
     lr_width: int = 3,
     bg_window_size: int = 7,
     min_bg_samples: int = 3,
+    use_glcm_texture: bool = False,
+    glcm_params: dict = None,
 ) -> np.ndarray:
     """
-    Apply blob removal using valley & symmetry conditions.
+    Apply blob removal using valley & symmetry conditions with optional GLCM integration.
     
     Removes thick blob-like artifacts while preserving scratch-like structures.
     Uses two conditions:
-    - Valley condition: |I_g - I_m| >= s_med (Gaussian blur vs horizontal median)
+    - Valley condition: |I_g - I_m| >= s_med (texture-aware blur vs horizontal median)  
     - Symmetry condition: |L3 - R3| <= s_avg (left vs right pixel means)
     
-    Pixels satisfying both conditions are preserved. Blob pixels (not satisfying
-    both conditions) are replaced with estimated background values instead of
-    being set to black, preventing artificial edge creation.
+    When use_glcm_texture=True, replaces global Gaussian blur with GLCM-based
+    texture-aware filtering that preserves scratch details while smoothing background.
     
     Parameters
     ----------
@@ -690,7 +695,7 @@ def apply_blob_removal(
     s_avg : float, default=20/255
         Threshold for symmetry condition |L3 - R3|.
     gauss_sigma : float, default=1.0
-        Standard deviation for Gaussian blur.
+        Standard deviation for Gaussian blur (used when use_glcm_texture=False).
     median_width : int, default=5
         Width of horizontal median filter (must be odd).
     lr_width : int, default=3
@@ -699,6 +704,10 @@ def apply_blob_removal(
         Window size for local background estimation (must be odd).
     min_bg_samples : int, default=3
         Minimum non-blob pixels needed for valid background estimation.
+    use_glcm_texture : bool, default=False
+        If True, use GLCM-based texture-aware filtering instead of Gaussian blur.
+    glcm_params : dict, optional
+        Parameters for GLCM texture filtering. If None, uses defaults.
     
     Returns
     -------
@@ -719,8 +728,31 @@ def apply_blob_removal(
     # Convert to float32 for processing
     img_f32 = img.astype(np.float32) / 255.0
     
-    # I_g: Gaussian blur
-    I_g = cv2.GaussianBlur(img_f32, ksize=(0, 0), sigmaX=gauss_sigma, borderType=cv2.BORDER_REPLICATE)
+    # I_g: texture-aware blur (GLCM-based) or traditional Gaussian blur
+    if use_glcm_texture:
+        # Import GLCM module only when needed to avoid circular imports
+        try:
+            from glcm import apply_glcm_for_blob_removal
+            
+            # Prepare GLCM parameters with blob removal optimization
+            if glcm_params is None:
+                glcm_params = {
+                    'preserve_scratches': True,
+                    'scratch_threshold': 0.4,  # Preserve potential scratches
+                    'window_size': 9,
+                    'smoothing_sigma': 1.0
+                }
+            
+            # Apply GLCM-based texture filtering optimized for blob removal
+            I_g_uint8 = apply_glcm_for_blob_removal(img, **glcm_params)
+            I_g = I_g_uint8.astype(np.float32) / 255.0
+            
+        except ImportError:
+            # Fallback to Gaussian blur if GLCM module not available
+            I_g = cv2.GaussianBlur(img_f32, ksize=(0, 0), sigmaX=gauss_sigma, borderType=cv2.BORDER_REPLICATE)
+    else:
+        # Traditional Gaussian blur
+        I_g = cv2.GaussianBlur(img_f32, ksize=(0, 0), sigmaX=gauss_sigma, borderType=cv2.BORDER_REPLICATE)
     
     # I_m: horizontal median
     I_m = median_filter(img_f32, size=(1, median_width), mode="nearest")
@@ -854,6 +886,7 @@ def auto_tune_glcm_params(
         params['blend_range'] = (0.3, 0.8)  # Reset to default
     
     return params
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -866,8 +899,20 @@ AVAILABLE_FILTERS = {
     'sobel': apply_sobel,
     'laplacian': apply_laplacian,
     'blob_removal': apply_blob_removal,
-    'glcm_texture': apply_glcm_texture_filter,
 }
+
+# Dynamic registration of GLCM filters
+def _register_glcm_filters():
+    """Dynamically register GLCM filters from glcm module."""
+    try:
+        from glcm import get_glcm_filters
+        AVAILABLE_FILTERS.update(get_glcm_filters())
+    except ImportError:
+        # GLCM module not available, skip registration
+        pass
+
+# Register GLCM filters on module import
+_register_glcm_filters()
 
 
 @timer
