@@ -39,6 +39,12 @@ python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain blob_removal
 
 # 11) PCA-based GLCM feature combination
 python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_feature sobel --glcm_combination_strategy pca_based --glcm_features homogeneity contrast energy correlation entropy
+
+# 12) GLCM with performance optimizations enabled
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multi_feature sobel --glcm_optimize --glcm_features homogeneity contrast energy correlation
+
+# 13) Multi-scale GLCM with optimizations for large images
+python cli.py inspect -i input_img/wafer_tile.bmp --prefilter_chain glcm_multiscale sobel --glcm_optimize --glcm_multiscale_scales 9 13 17
 """
 
 from __future__ import annotations
@@ -92,7 +98,8 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
             'levels': args.glcm_levels,
             'features': args.glcm_features,
             'combination_strategy': args.glcm_combination_strategy,
-            'smoothing_sigma': args.glcm_smoothing_sigma
+            'smoothing_sigma': args.glcm_smoothing_sigma,
+            'use_optimization': args.glcm_optimize
         },
         'glcm_multiscale': {
             'scales': args.glcm_multiscale_scales,
@@ -102,7 +109,8 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
             'angles': args.glcm_angles,
             'levels': args.glcm_levels,
             'combination_strategy': args.glcm_combination_strategy,
-            'smoothing_sigma': args.glcm_smoothing_sigma
+            'smoothing_sigma': args.glcm_smoothing_sigma,
+            'use_optimization': args.glcm_optimize
         },
         'glcm_blob_removal': {
             'preserve_scratches': True,
@@ -311,6 +319,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=['weighted_average', 'adaptive_fusion'],
         default='weighted_average',
         help="Multi-scale fusion strategy (default: weighted_average)."
+    )
+    p_ins.add_argument(
+        "--glcm_optimize",
+        action="store_true",
+        help="Enable GLCM performance optimizations (LUT caching and vectorization)."
     )
     
     p_ins.add_argument(

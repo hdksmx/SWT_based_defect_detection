@@ -45,6 +45,43 @@ from sklearn.preprocessing import StandardScaler
 
 from io_utils import timer
 
+# --------------------------------------------------------------------------- #
+# Performance optimization: Global LUT cache
+# --------------------------------------------------------------------------- #
+_GLCM_FEATURE_CACHE = {}
+
+def _get_homogeneity_lut(levels: int) -> np.ndarray:
+    """Get cached homogeneity lookup table."""
+    if levels not in _GLCM_FEATURE_CACHE:
+        lut = np.zeros((levels, levels), dtype=np.float32)
+        for i in range(levels):
+            for j in range(levels):
+                lut[i, j] = 1.0 / (1.0 + abs(i - j))
+        _GLCM_FEATURE_CACHE[levels] = {'homogeneity': lut}
+    return _GLCM_FEATURE_CACHE[levels]['homogeneity']
+
+def _get_contrast_lut(levels: int) -> np.ndarray:
+    """Get cached contrast lookup table."""
+    cache_key = f'contrast_{levels}'
+    if cache_key not in _GLCM_FEATURE_CACHE:
+        lut = np.zeros((levels, levels), dtype=np.float32)
+        for i in range(levels):
+            for j in range(levels):
+                lut[i, j] = (i - j) ** 2
+        _GLCM_FEATURE_CACHE[cache_key] = lut
+    return _GLCM_FEATURE_CACHE[cache_key]
+
+def _get_dissimilarity_lut(levels: int) -> np.ndarray:
+    """Get cached dissimilarity lookup table."""
+    cache_key = f'dissimilarity_{levels}'
+    if cache_key not in _GLCM_FEATURE_CACHE:
+        lut = np.zeros((levels, levels), dtype=np.float32)
+        for i in range(levels):
+            for j in range(levels):
+                lut[i, j] = abs(i - j)
+        _GLCM_FEATURE_CACHE[cache_key] = lut
+    return _GLCM_FEATURE_CACHE[cache_key]
+
 __all__ = [
     "apply_glcm_texture_filter",
     "apply_multi_feature_glcm_filter", 
@@ -261,12 +298,92 @@ def _compute_single_feature(
         raise ValueError(f"Unknown feature: {feature}")
 
 
+def _compute_single_feature_optimized(
+    glcm: np.ndarray,
+    feature: str
+) -> float:
+    """
+    Compute single GLCM feature using optimized LUT/vectorization approach.
+    
+    This is the performance-optimized version of _compute_single_feature().
+    Uses lookup tables and vectorized operations for significant speed improvement.
+    
+    Parameters
+    ----------
+    glcm : np.ndarray
+        Normalized GLCM matrix.
+    feature : str
+        Feature name: 'homogeneity', 'contrast', 'energy', 'correlation', 'entropy', 'dissimilarity'.
+        
+    Returns
+    -------
+    float
+        Feature value (identical to _compute_single_feature but faster).
+    """
+    levels = glcm.shape[0]
+    
+    if feature == 'homogeneity':
+        # Optimized with LUT: Homogeneity = Σ P(i,j) / (1 + |i-j|)
+        lut = _get_homogeneity_lut(levels)
+        return np.sum(glcm * lut)
+        
+    elif feature == 'contrast':
+        # Optimized with LUT: Contrast = Σ P(i,j) * (i-j)²
+        lut = _get_contrast_lut(levels)
+        return np.sum(glcm * lut)
+        
+    elif feature == 'energy':
+        # Vectorized: Energy (ASM) = Σ P(i,j)²
+        return np.sum(glcm ** 2)
+        
+    elif feature == 'correlation':
+        # Vectorized correlation computation
+        i_indices, j_indices = np.meshgrid(range(levels), range(levels), indexing='ij')
+        
+        # Marginal probabilities
+        p_i = np.sum(glcm, axis=1)  # Sum over columns
+        p_j = np.sum(glcm, axis=0)  # Sum over rows
+        
+        # Marginal means
+        mu_i = np.sum(i_indices[:, 0] * p_i)
+        mu_j = np.sum(j_indices[0, :] * p_j)
+        
+        # Marginal variances
+        var_i = np.sum(((i_indices[:, 0] - mu_i) ** 2) * p_i)
+        var_j = np.sum(((j_indices[0, :] - mu_j) ** 2) * p_j)
+        
+        sigma_i = np.sqrt(var_i)
+        sigma_j = np.sqrt(var_j)
+        
+        if sigma_i * sigma_j > 1e-10:
+            correlation_matrix = ((i_indices - mu_i) * (j_indices - mu_j)) / (sigma_i * sigma_j)
+            return np.sum(glcm * correlation_matrix)
+        else:
+            return 0.0
+            
+    elif feature == 'entropy':
+        # Vectorized entropy with safe log
+        valid_mask = glcm > 1e-10
+        entropy_terms = np.zeros_like(glcm)
+        entropy_terms[valid_mask] = glcm[valid_mask] * np.log(glcm[valid_mask])
+        return -np.sum(entropy_terms)
+        
+    elif feature == 'dissimilarity':
+        # Optimized with LUT: Dissimilarity = Σ P(i,j) * |i-j|
+        lut = _get_dissimilarity_lut(levels)
+        return np.sum(glcm * lut)
+        
+    else:
+        raise ValueError(f"Unknown feature: {feature}")
+
+
 def _compute_all_features(
     window: np.ndarray,
     distances: list[int] = [1, 2],
     angles: list[int] = [0, 45, 90, 135],
     levels: int = 32,
-    features: list[str] = ['homogeneity', 'contrast', 'energy', 'correlation', 'entropy']
+    features: list[str] = ['homogeneity', 'contrast', 'energy', 'correlation', 'entropy'],
+    use_optimization: bool = False
 ) -> dict[str, float]:
     """
     Compute all GLCM features for a window across multiple distances and angles.
@@ -283,6 +400,8 @@ def _compute_all_features(
         Number of gray levels.
     features : list[str]
         List of features to compute.
+    use_optimization : bool, default=False
+        If True, use optimized LUT/vectorization approach.
         
     Returns
     -------
@@ -297,7 +416,10 @@ def _compute_all_features(
             glcm = _compute_glcm_matrix(window, distance, angle, levels)
             
             for feature in features:
-                value = _compute_single_feature(glcm, feature)
+                if use_optimization:
+                    value = _compute_single_feature_optimized(glcm, feature)
+                else:
+                    value = _compute_single_feature(glcm, feature)
                 all_feature_values[feature].append(value)
     
     # Aggregate across directions
@@ -463,7 +585,8 @@ def _compute_multi_feature_map(
     distances: list[int] = [1, 2],
     angles: list[int] = [0, 45, 90, 135],
     levels: int = 32,
-    features: list[str] = ['homogeneity', 'contrast', 'energy', 'correlation']
+    features: list[str] = ['homogeneity', 'contrast', 'energy', 'correlation'],
+    use_optimization: bool = False
 ) -> dict[str, np.ndarray]:
     """
     Compute multi-feature GLCM maps for entire image.
@@ -482,6 +605,8 @@ def _compute_multi_feature_map(
         Number of gray levels.
     features : list[str]
         List of features to compute.
+    use_optimization : bool, default=False
+        If True, use optimized LUT/vectorization approach.
         
     Returns
     -------
@@ -509,7 +634,7 @@ def _compute_multi_feature_map(
             
             # Compute all features for this window
             window_features = _compute_all_features(
-                window, distances, angles, levels, features
+                window, distances, angles, levels, features, use_optimization
             )
             
             # Store aggregated features
@@ -904,7 +1029,8 @@ def apply_multi_feature_glcm_filter(
     combination_strategy: Literal['scratch_optimized', 'weighted_adaptive', 'pca_based'] = 'scratch_optimized',
     feature_weights: dict[str, float] = None,
     smoothing_sigma: float = 1.5,
-    blend_range: tuple[float, float] = (0.3, 0.8)
+    blend_range: tuple[float, float] = (0.3, 0.8),
+    use_optimization: bool = False
 ) -> np.ndarray:
     """
     Apply advanced multi-feature GLCM texture filtering.
@@ -948,7 +1074,7 @@ def apply_multi_feature_glcm_filter(
     
     # 1. Compute multi-feature maps
     feature_maps = _compute_multi_feature_map(
-        img, window_size, distances, angles, levels, features
+        img, window_size, distances, angles, levels, features, use_optimization
     )
     
     # 2. Combine features intelligently
@@ -1006,6 +1132,7 @@ def apply_multiscale_glcm_filter(
     features: list[str] = ['homogeneity', 'contrast', 'energy', 'correlation'],
     fusion_strategy: Literal['weighted_average', 'adaptive_fusion'] = 'weighted_average',
     scale_weights: list[float] = None,
+    use_optimization: bool = False,
     **kwargs
 ) -> np.ndarray:
     """
@@ -1063,6 +1190,7 @@ def apply_multiscale_glcm_filter(
             'window_size': scale,
             'features': features,
             'combination_strategy': 'scratch_optimized',
+            'use_optimization': use_optimization,
             **kwargs
         }
         
