@@ -241,6 +241,150 @@ def apply_laplacian(
     return magnitude.astype(np.float32)
 
 
+def _get_samples_in_radius(
+    img: np.ndarray, 
+    y: int, 
+    x: int, 
+    radius: int, 
+    blob_mask: np.ndarray
+) -> np.ndarray:
+    """
+    Get non-blob pixel samples within a given radius from point (y, x).
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image (float32).
+    y, x : int
+        Center coordinates.
+    radius : int
+        Search radius.
+    blob_mask : np.ndarray
+        Boolean mask where True indicates blob pixels.
+        
+    Returns
+    -------
+    np.ndarray
+        Array of non-blob pixel values within radius.
+    """
+    h, w = img.shape
+    samples = []
+    
+    y_min = max(0, y - radius)
+    y_max = min(h, y + radius + 1)
+    x_min = max(0, x - radius)
+    x_max = min(w, x + radius + 1)
+    
+    for ny in range(y_min, y_max):
+        for nx in range(x_min, x_max):
+            if not blob_mask[ny, nx]:  # non-blob pixel
+                distance = np.sqrt((ny - y)**2 + (nx - x)**2)
+                if distance <= radius:
+                    samples.append(img[ny, nx])
+    
+    return np.array(samples)
+
+
+def _fallback_background(
+    img: np.ndarray, 
+    y: int, 
+    x: int, 
+    blob_mask: np.ndarray
+) -> float:
+    """
+    Fallback strategy for background estimation when insufficient samples.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image (float32).
+    y, x : int
+        Pixel coordinates.
+    blob_mask : np.ndarray
+        Boolean mask where True indicates blob pixels.
+        
+    Returns
+    -------
+    float
+        Estimated background value.
+    """
+    # Strategy 1: Expand search radius progressively
+    for radius in [10, 20, 30]:
+        samples = _get_samples_in_radius(img, y, x, radius, blob_mask)
+        if len(samples) >= 3:
+            return np.mean(samples)
+    
+    # Strategy 2: Use median of all non-blob pixels
+    non_blob_pixels = img[~blob_mask]
+    if len(non_blob_pixels) > 0:
+        return np.median(non_blob_pixels)
+    
+    # Strategy 3: Keep original pixel value (last resort)
+    return img[y, x]
+
+
+def _estimate_local_background(
+    img: np.ndarray, 
+    blob_mask: np.ndarray, 
+    window_size: int = 7,
+    min_samples: int = 3
+) -> np.ndarray:
+    """
+    Estimate background for blob pixels using local non-blob pixel statistics.
+    
+    For each blob pixel, compute the mean of non-blob pixels within a local window.
+    If insufficient samples are found, use fallback strategy with expanded search.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image (float32, range [0,1]).
+    blob_mask : np.ndarray
+        Boolean mask where True indicates blob pixels to be replaced.
+    window_size : int, default=7
+        Size of local window for background estimation (must be odd).
+    min_samples : int, default=3
+        Minimum number of non-blob pixels needed for valid estimation.
+        
+    Returns
+    -------
+    np.ndarray
+        Background-estimated image (same shape and dtype as input).
+    """
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be odd")
+    
+    background = img.copy()
+    h, w = img.shape
+    half_win = window_size // 2
+    
+    # Find blob pixel coordinates
+    blob_coords = np.where(blob_mask)
+    
+    for y, x in zip(blob_coords[0], blob_coords[1]):
+        # Define window boundaries (clipped to image bounds)
+        y_min = max(0, y - half_win)
+        y_max = min(h, y + half_win + 1)
+        x_min = max(0, x - half_win)
+        x_max = min(w, x + half_win + 1)
+        
+        # Extract window pixels
+        window_img = img[y_min:y_max, x_min:x_max]
+        window_mask = blob_mask[y_min:y_max, x_min:x_max]
+        
+        # Get non-blob pixels in window
+        valid_pixels = window_img[~window_mask]
+        
+        if len(valid_pixels) >= min_samples:
+            # Sufficient samples: use mean
+            background[y, x] = np.mean(valid_pixels)
+        else:
+            # Insufficient samples: use fallback strategy
+            background[y, x] = _fallback_background(img, y, x, blob_mask)
+    
+    return background
+
+
 def _left_right_means(img: np.ndarray, width: int = 3) -> tuple[np.ndarray, np.ndarray]:
     """
     Mean of *width* pixels immediately to the left / right of each pixel.
@@ -286,6 +430,8 @@ def apply_blob_removal(
     gauss_sigma: float = 1.0,
     median_width: int = 5,
     lr_width: int = 3,
+    bg_window_size: int = 7,
+    min_bg_samples: int = 3,
 ) -> np.ndarray:
     """
     Apply blob removal using valley & symmetry conditions.
@@ -295,7 +441,9 @@ def apply_blob_removal(
     - Valley condition: |I_g - I_m| >= s_med (Gaussian blur vs horizontal median)
     - Symmetry condition: |L3 - R3| <= s_avg (left vs right pixel means)
     
-    Pixels satisfying both conditions are preserved, others are removed.
+    Pixels satisfying both conditions are preserved. Blob pixels (not satisfying
+    both conditions) are replaced with estimated background values instead of
+    being set to black, preventing artificial edge creation.
     
     Parameters
     ----------
@@ -311,11 +459,15 @@ def apply_blob_removal(
         Width of horizontal median filter (must be odd).
     lr_width : int, default=3
         Width for left/right mean windows.
+    bg_window_size : int, default=7
+        Window size for local background estimation (must be odd).
+    min_bg_samples : int, default=3
+        Minimum non-blob pixels needed for valid background estimation.
     
     Returns
     -------
     np.ndarray
-        8-bit image with blobs removed (uint8).
+        8-bit image with blobs replaced by estimated background (uint8).
     """
     _validate_input(img)
     
@@ -323,6 +475,10 @@ def apply_blob_removal(
         raise ValueError("median_width must be odd")
     if lr_width < 1:
         raise ValueError("lr_width must be ≥ 1")
+    if bg_window_size % 2 == 0:
+        raise ValueError("bg_window_size must be odd")
+    if min_bg_samples < 1:
+        raise ValueError("min_bg_samples must be ≥ 1")
     
     # Convert to float32 for processing
     img_f32 = img.astype(np.float32) / 255.0
@@ -341,12 +497,21 @@ def apply_blob_removal(
     c2 = np.abs(L3 - R3) <= s_avg    # Symmetry condition
     
     # Keep pixels that satisfy both conditions (likely scratches)
-    # Remove pixels that don't satisfy both conditions (likely blobs)
+    # Replace pixels that don't satisfy both conditions (likely blobs)
     mask = np.logical_and(c1, c2)
+    blob_mask = ~mask
     
-    # Apply mask to original image
-    result = img.copy()
-    result[~mask] = 0  # Remove blob pixels by setting to black
+    # Estimate background for blob pixels
+    background_img = _estimate_local_background(
+        img_f32, blob_mask, bg_window_size, min_bg_samples
+    )
+    
+    # Apply background estimation to blob pixels
+    result_f32 = img_f32.copy()
+    result_f32[blob_mask] = background_img[blob_mask]
+    
+    # Convert back to uint8
+    result = (result_f32 * 255).astype(np.uint8)
     
     return result
 
