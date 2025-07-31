@@ -1,0 +1,58 @@
+# Development Requirements for Wafer WTMS
+# ======================================
+
+# Include base requirements
+-r requirements.txt
+
+# Code Quality and Formatting
+# ---------------------------
+black>=22.0.0                 # Code formatter
+isort>=5.10.0                 # Import sorting
+flake8>=4.0.0                 # Linting and style checking
+mypy>=0.950                   # Static type checking
+
+# Testing and Coverage
+# -------------------
+pytest>=7.0.0                 # Testing framework
+pytest-cov>=4.0.0             # Coverage reporting
+pytest-xdist>=2.5.0           # Parallel test execution
+pytest-mock>=3.7.0            # Mocking utilities
+
+# Performance and Profiling
+# -------------------------
+memory-profiler>=0.60.0       # Memory usage profiling
+line-profiler>=3.5.0          # Line-by-line profiling
+psutil>=5.8.0                 # System resource monitoring
+
+# Documentation and Analysis
+# --------------------------
+matplotlib>=3.5.0             # Plotting for analysis and debugging
+seaborn>=0.11.0               # Statistical plotting (optional)
+jupyter>=1.0.0                # Notebook for experiments (optional)
+ipython>=8.0.0                # Enhanced REPL
+
+# Build and Packaging
+# -------------------
+build>=0.8.0                  # Build system
+twine>=4.0.0                  # Package uploading
+wheel>=0.37.0                 # Wheel building
+
+# Pre-commit Hooks (optional)
+# ---------------------------
+pre-commit>=2.17.0            # Git hooks for code quality
+
+# Development Installation
+# -----------------------
+# pip install -r requirements-dev.txt
+#
+# Setup pre-commit hooks:
+#   pre-commit install
+#
+# Run tests with coverage:
+#   pytest --cov=. --cov-report=html
+#
+# Format code:
+#   black . && isort .
+#
+# Type checking:
+#   mypy .

@@ -62,7 +62,7 @@ def _validate_input(img: np.ndarray, allow_float: bool = False) -> None:
         if img.dtype != np.uint8:
             raise ValueError("Input image must be dtype uint8 (8-bit gray).")
     if img.ndim != 2:
-        raise ValueError("Input image must be single-channel gray (H×W).")
+        raise ValueError("Input image must be single-channel gray (HxW).")
 
 
 # --------------------------------------------------------------------------- #
@@ -80,7 +80,7 @@ def apply_clahe(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     clip_limit : float, default 2.0
         Threshold for contrast limiting.
     tile_grid_size : tuple, default (8, 8)
@@ -108,7 +108,7 @@ def apply_median(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     ksize : int, default 3
         Median filter kernel size. Must be odd.
         
@@ -137,7 +137,7 @@ def apply_gaussian(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     ksize : int, default 3
         Gaussian kernel size. Must be odd.
     sigma : float, default 1.0
@@ -168,7 +168,7 @@ def apply_sobel(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     ksize : int, default 3
         Sobel operator aperture size (1, 3, 5, or 7).
     normalize : bool, default True
@@ -214,7 +214,7 @@ def apply_laplacian(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     ksize : int, default 3
         Laplacian kernel size. Must be odd.
     normalize : bool, default True
@@ -327,7 +327,6 @@ def _fallback_background(
 # The following functions are kept for reference but should not be used.
 # Use glcm.py module instead.
 
-"""
 def _compute_glcm_homogeneity(
     window: np.ndarray,
     distance: int = 1,
@@ -346,7 +345,7 @@ def _compute_glcm_homogeneity(
     Parameters
     ----------
     window : np.ndarray
-        Input window (typically 11×11) with values in [0,255].
+        Input window (typically 11x11) with values in [0,255].
     distance : int, default=1
         Pixel distance for co-occurrence calculation.
     angle : int, default=0
@@ -500,7 +499,7 @@ def apply_glcm_texture_filter(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     homogeneity_threshold : float, default=0.6
         Threshold for determining homogeneous regions.
         Higher values = more selective smoothing.
@@ -689,7 +688,7 @@ def apply_blob_removal(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     s_med : float, default=3/255
         Threshold for valley condition |I_g - I_m|.
     s_avg : float, default=20/255
@@ -886,7 +885,7 @@ def auto_tune_glcm_params(
         params['blend_range'] = (0.3, 0.8)  # Reset to default
     
     return params
-"""
+
 
 
 # --------------------------------------------------------------------------- #
@@ -927,7 +926,7 @@ def apply_filter_chain(
     Parameters
     ----------
     img : np.ndarray
-        8-bit grayscale input image (H×W).
+        8-bit grayscale input image (HxW).
     filter_chain : list[str]
         List of filter names to apply in order, e.g. ['clahe', 'median', 'sobel'].
     filter_params : dict, optional
@@ -982,7 +981,7 @@ def median_then_sobel(
     Parameters
     ----------
     img : np.ndarray
-        8‑bit gray‑scale input image (H×W).
+        8‑bit gray‑scale input image (HxW).
     ksize : int, default 3
         Median filter kernel size. Must be odd.
     sobel_ksize : int, default 3
