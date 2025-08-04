@@ -15,9 +15,9 @@ For a given candidate pixel *p* and WTM map of scale *s*:
 2. Sum the *original* WTM values at those pixels – **WTMS**.
 3. Repeat at scale *s+1*; compute the inter‑scale ratio
 
-        R = (WTMS_{s+1} - WTMS_s) / (|WTMS_s| + eps)
+        R = WTMS_{s+1} / (WTMS_s + eps)
 
-   Negative R indicates a defect (sharp energy drop).
+   High R indicates a defect (energy ratio jump).
 
 Public API
 ----------
@@ -124,9 +124,9 @@ def interscale_ratio(
     """
     Compute inter‑scale ratio R between two WTMS arrays (or scalars).
 
-    R = (wtms_{s+1} - wtms_s) / (|wtms_s| + eps)
+    R = wtms_{s+1} / (wtms_s + eps)
 
-    Negative R → candidate pixel more likely a defect.
+    High R → candidate pixel more likely a defect.
 
     Parameters
     ----------
@@ -140,4 +140,4 @@ def interscale_ratio(
     same type as inputs
         Ratio array / scalar.
     """
-    return (np.asarray(wtms_s1) - np.asarray(wtms_s)) / (np.abs(wtms_s) + eps)
+    return np.asarray(wtms_s1) / (np.asarray(wtms_s) + eps)

@@ -98,6 +98,29 @@ def apply_clahe(
 
 
 @timer
+def apply_he(img: np.ndarray) -> np.ndarray:
+    """
+    Apply global Histogram Equalization (HE) for contrast enhancement.
+    
+    Unlike CLAHE, HE performs global histogram equalization without
+    contrast limiting, which may provide better dynamic range for GLCM.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        8-bit grayscale input image (H x W).
+        
+    Returns
+    -------
+    np.ndarray
+        8-bit HE enhanced image with full dynamic range [0,255].
+    """
+    _validate_input(img)
+    
+    return cv2.equalizeHist(img)
+
+
+@timer
 def apply_median(
     img: np.ndarray,
     ksize: int = 3,
@@ -893,6 +916,7 @@ def auto_tune_glcm_params(
 # --------------------------------------------------------------------------- #
 AVAILABLE_FILTERS = {
     'clahe': apply_clahe,
+    'he': apply_he,
     'median': apply_median,
     'gaussian': apply_gaussian, 
     'sobel': apply_sobel,

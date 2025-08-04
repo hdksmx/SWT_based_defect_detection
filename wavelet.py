@@ -8,7 +8,7 @@ Wavelet decomposition & Wavelet Transform Modulus (WTM) utilities for the
 Public API
 ----------
 swt2(img: NDArray[np.uint8],
-     wavelet: str = "coif6",
+     wavelet: str = "sym8",
      level: int = 2) -> list[CoeffTuple]
 
 wtm(coeffs: CoeffTuple) -> NDArray[np.float32]
@@ -57,7 +57,7 @@ def _validate_input(img: np.ndarray) -> None:
 @timer
 def swt2(
     img: np.ndarray,
-    wavelet: str = "coif6",
+    wavelet: str = "sym8",
     level: int = 2,
 ) -> List[CoeffTuple]:
     """
@@ -67,7 +67,7 @@ def swt2(
     ----------
     img : np.ndarray
         2‑D float32 array (H×W).
-    wavelet : str, default 'coif6'
+    wavelet : str, default 'sym8'
         Wavelet family / filter name recognised by PyWavelets.
     level : int, default 2
         Decomposition level. Must be ≥1.

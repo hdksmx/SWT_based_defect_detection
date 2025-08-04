@@ -86,7 +86,7 @@ class PipelineConfig:
     sobel_kernel: int = 3
 
     # Wavelet
-    wavelet_name: str = "coif6"
+    wavelet_name: str = "sym8"
     dwt_level: int = 2
 
     # Candidate sampling
@@ -98,6 +98,9 @@ class PipelineConfig:
 
     # GS filtering
     gs_csv: Optional[Path] = None  # path to golden‑set CSV; None → skip filter
+
+    # Interscale ratio test
+    interscale_threshold: float = 2.0
 
     # Post‑process
     min_region_area: int = 5
@@ -113,6 +116,7 @@ class PipelineConfig:
     glcm_features: List[str] = field(default_factory=lambda: ['homogeneity', 'contrast', 'energy', 'correlation'])
     glcm_combination_strategy: str = 'scratch_optimized'
     glcm_smoothing_sigma: float = 1.5
+    glcm_blend_range: List[float] = field(default_factory=lambda: [0.3, 0.8])
     glcm_multiscale_scales: List[int] = field(default_factory=lambda: [7, 11, 15])
     glcm_multiscale_fusion: str = 'weighted_average'
     
@@ -152,6 +156,7 @@ class PipelineConfig:
                 'features': self.glcm_features,
                 'combination_strategy': self.glcm_combination_strategy,
                 'smoothing_sigma': self.glcm_smoothing_sigma,
+                'blend_range': tuple(self.glcm_blend_range),
                 'use_optimization': self.use_glcm_optimization,
                 'save_debug_images': self.enable_debug_output
             },
@@ -340,9 +345,9 @@ def run(img_path: str | Path, cfg: PipelineConfig | None = None) -> PipelineResu
 
     # 6. Interscale ratio test
     R = interscale_ratio(wtms1, wtms2)
-    keep_idx = R < 0.0
+    keep_idx = R >= cfg.interscale_threshold
     coords_after_ratio = cand_coords[keep_idx]
-    logger.info(f"Candidates after interscale test: {len(coords_after_ratio)}")
+    logger.info(f"Candidates after interscale test (R ≥ {cfg.interscale_threshold}): {len(coords_after_ratio)}")
 
     raw_mask = np.zeros_like(img_u8, dtype=bool)
     raw_mask[coords_after_ratio[:, 0], coords_after_ratio[:, 1]] = True

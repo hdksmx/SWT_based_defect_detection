@@ -115,8 +115,11 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
         glcm_features=args.glcm_features,
         glcm_combination_strategy=args.glcm_combination_strategy,
         glcm_smoothing_sigma=args.glcm_smoothing_sigma,
+        glcm_blend_range=args.glcm_blend_range,
         glcm_multiscale_scales=args.glcm_multiscale_scales,
         glcm_multiscale_fusion=args.glcm_multiscale_fusion,
+        # Interscale ratio test
+        interscale_threshold=args.interscale_threshold,
         # Debugging options
         enable_debug_output=args.debug,
     )
@@ -174,7 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefilter_chain",
         nargs='+',
         default=['median', 'sobel'],
-        choices=['clahe', 'median', 'gaussian', 'sobel', 'laplacian', 'blob_removal', 
+        choices=['clahe', 'he', 'median', 'gaussian', 'sobel', 'laplacian', 'blob_removal', 
                 'glcm_texture', 'glcm_multi_feature', 'glcm_multiscale', 'glcm_blob_removal'],
         help="Prefilter chain to apply in order (default: median sobel). "
              "GLCM options: glcm_texture, glcm_multi_feature, glcm_multiscale, glcm_blob_removal."
@@ -292,6 +295,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Gaussian smoothing sigma for GLCM filters (default: 1.5)."
     )
     p_ins.add_argument(
+        "--glcm_blend_range",
+        nargs=2,
+        type=float,
+        default=[0.3, 0.8],
+        help="Alpha blending range for GLCM texture filtering (default: 0.3 0.8)."
+    )
+    p_ins.add_argument(
         "--glcm_multiscale_scales",
         nargs='+',
         type=int,
@@ -323,7 +333,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_ins.add_argument(
         "--wavelet_name",
-        default="coif6",
+        default="sym8",
         help="PyWavelets wavelet name (e.g. haar, db2, coif6).",
     )
     
@@ -359,6 +369,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=20,
         help="Length threshold for scratch classification (default: 20).",
+    )
+    
+    # Interscale ratio test parameters
+    p_ins.add_argument(
+        "--interscale_threshold",
+        type=float,
+        default=2.0,
+        help="Interscale ratio threshold for defect detection (R ≥ threshold → defect, default: 2.0).",
     )
     
     p_ins.set_defaults(func=_cmd_inspect)

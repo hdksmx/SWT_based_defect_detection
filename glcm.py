@@ -162,8 +162,8 @@ def _compute_glcm_matrix(
     """
     h, w = window.shape
     
-    # Quantize to reduce gray levels
-    quantized = (window * (levels - 1) / 255.0).astype(np.int32)
+    # Quantize to reduce gray levels (fix overflow issue)
+    quantized = (window.astype(np.float32) * (levels - 1) / 255.0).astype(np.int32)
     quantized = np.clip(quantized, 0, levels - 1)
     
     # Initialize GLCM matrix

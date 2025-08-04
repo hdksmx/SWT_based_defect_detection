@@ -139,7 +139,7 @@ python cli.py build-gs -m reference_mask.png -o golden_set.csv
 | 3. WTM 계산 | `wavelet.py` | Wavelet Transform Modulus 계산 |
 | 4. 후보점 샘플링 | `candidate.py` | μ+3σ threshold로 후보 픽셀 추출 |
 | 5. WTMS 계산 | `wtms.py` | 각 후보점에서 WTMS 값 계산 |
-| 6. Interscale Test | `wtms.py` | 멀티스케일 비율 테스트 (R < 0) |
+| 6. Interscale Test | `wtms.py` | 멀티스케일 비율 테스트 (R ≥ threshold) |
 | 7. Golden Set 필터 | `golden_set.py` | 참조 데이터 기반 거짓양성 제거 |
 | 8. 후처리 | `postprocess.py` | 연결성분 분석 및 스크래치/파티클 분류 |
 
@@ -187,6 +187,7 @@ GLCM 텍스처 필터를 사용하면 다음 추가 디버그 이미지들이 �
 | `--glcm_features`| `homogeneity`...| 사용할 GLCM 텍스처 특징 |
 | `--min_region_area` | `5` | 최소 영역 크기 (픽셀) |
 | `--ecc_thr` | `0.9` | 스크래치 분류 이심률 임계값 |
+| `--interscale_threshold` | `2.0` | 결함 판정 임계값 (R ≥ threshold) |
 
 ---
 
