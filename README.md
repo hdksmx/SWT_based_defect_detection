@@ -6,6 +6,9 @@
 본 구현체는 다음 IEEE 논문에 기반합니다:
 > *"A Wavelet-Based Approach in Detecting Visual Defects on Semiconductor Wafer Dies,"* in IEEE Transactions on Semiconductor Manufacturing, vol. 23, no. 2, pp. 284-292, May 2010, doi: 10.1109/TSM.2010.2046108
 
+> **⚠️ 개발 상태**: GLCM 기반 전처리 기능과 Golden Set 후처리 기능은 아직 **실험적** 상태입니다. 
+> 안정적인 결함 검출을 위해서는 **CLAHE → Median → Sobel** 전처리 체인을 권장합니다.
+
 ---
 
 ## 1. 프로젝트 구조
@@ -77,26 +80,25 @@ python cli.py --help
 
 ## 3. 사용법
 
-### 기본 결함 검사 (기본 전처리: median → sobel)
+### 기본 결함 검사 (현재 권장 방식)
 ```bash
-python cli.py inspect -i input_img/sample_1_P.bmp --debug
-```
-
-### GLCM 텍스처 필터 포함 (권장)
-```bash
+# CLAHE → Median → Sobel 전처리 체인 (안정적)
 python cli.py inspect -i input_img/sample_1_P.bmp \
-    --prefilter_chain median glcm_texture sobel \
+    --prefilter_chain clahe median sobel \
     --debug
 ```
 
-### 고급 GLCM 파라미터 설정
+### 기본 전처리 (최소 구성)
 ```bash
+# Median → Sobel만 적용 (기본 설정)
+python cli.py inspect -i input_img/sample_1_P.bmp --debug
+```
+
+### 실험적 GLCM 텍스처 필터 (⚠️ 미완성)
+```bash
+# GLCM 기능 테스트용 (안정성 보장 안됨)
 python cli.py inspect -i input_img/sample_1_P.bmp \
-    --prefilter_chain median glcm_multi_feature sobel \
-    --glcm_window_size 11 \
-    --glcm_features homogeneity contrast energy correlation \
-    --glcm_smoothing_sigma 1.5 \
-    --std_factor 3.0 \
+    --prefilter_chain median glcm_texture sobel \
     --debug
 ```
 
@@ -112,13 +114,15 @@ python cli.py inspect -i input_img/sample_1_P.bmp --debug
 python cli.py inspect -i input_img/Siltron_Scratch_1.bmp --debug
 ```
 
-### Golden Set을 사용한 결함 검사
+### Golden Set을 사용한 결함 검사 (⚠️ 실험적)
 ```bash
+# Golden Set 기능은 아직 미완성 상태입니다
 python cli.py inspect -i input_img/sample_1_P.bmp --gs golden_set.csv --debug
 ```
 
-### Golden Set 생성
+### Golden Set 생성 (⚠️ 실험적)
 ```bash
+# 참조용으로만 사용 권장
 python cli.py build-gs -m reference_mask.png -o golden_set.csv
 ```
 
@@ -132,16 +136,17 @@ python cli.py build-gs -m reference_mask.png -o golden_set.csv
 
 ## 4. 알고리즘 파이프라인
 
-| 단계 | 모듈 | 설명 |
-|------|------|------|
-| 1. 전처리 | `prefilter.py` | GLCM, CLAHE, Median, Sobel 등의 필터 체인 적용 |
-| 2. SWT 변환 | `wavelet.py` | 2-레벨 Stationary Wavelet Transform |
-| 3. WTM 계산 | `wavelet.py` | Wavelet Transform Modulus 계산 |
-| 4. 후보점 샘플링 | `candidate.py` | μ+3σ threshold로 후보 픽셀 추출 |
-| 5. WTMS 계산 | `wtms.py` | 각 후보점에서 WTMS 값 계산 |
-| 6. Interscale Test | `wtms.py` | 멀티스케일 비율 테스트 (R ≥ threshold) |
-| 7. Golden Set 필터 | `golden_set.py` | 참조 데이터 기반 거짓양성 제거 |
-| 8. 후처리 | `postprocess.py` | 연결성분 분석 및 스크래치/파티클 분류 |
+| 단계 | 모듈 | 설명 | 상태 |
+|------|------|------|------|
+| 1. 전처리 | `prefilter.py` | CLAHE, Median, Sobel 필터 체인 적용 | ✅ 안정 |
+| 2. SWT 변환 | `wavelet.py` | 2-레벨 Stationary Wavelet Transform | ✅ 안정 |
+| 3. WTM 계산 | `wavelet.py` | Wavelet Transform Modulus 계산 | ✅ 안정 |
+| 4. 후보점 샘플링 | `candidate.py` | μ+3σ threshold로 후보 픽셀 추출 | ✅ 안정 |
+| 5. WTMS 계산 | `wtms.py` | 각 후보점에서 WTMS 값 계산 | ✅ 안정 |
+| 6. Interscale Test | `wtms.py` | 멀티스케일 비율 테스트 (R ≥ threshold) | ✅ 안정 |
+| 7. Golden Set 필터 | `golden_set.py` | 참조 데이터 기반 거짓양성 제거 | ⚠️ 실험적 |
+| 8. 후처리 | `postprocess.py` | 연결성분 분석 및 스크래치/파티클 분류 | ✅ 안정 |
+| - | `glcm.py` | GLCM 기반 텍스처 필터링 | ⚠️ 실험적 |
 
 ---
 
@@ -158,9 +163,10 @@ python cli.py build-gs -m reference_mask.png -o golden_set.csv
 | `03_raw_detect_mask.png` | Interscale 테스트 후 원시 검출 마스크 |
 | `04_cleaned_detect_mask.png` | Golden Set 필터링 후 최종 마스크 |
 
-### GLCM 전처리 사용 시 추가 디버그 이미지
+### GLCM 전처리 사용 시 추가 디버그 이미지 (⚠️ 실험적)
 
 GLCM 텍스처 필터를 사용하면 다음 추가 디버그 이미지들이 생성됩니다:
+> **주의**: GLCM 기능은 아직 완전히 검증되지 않았으며, 예상과 다른 결과를 출력할 수 있습니다.
 
 | 파일명 패턴 | 내용 |
 |--------|------|
@@ -179,8 +185,8 @@ GLCM 텍스처 필터를 사용하면 다음 추가 디버그 이미지들이 �
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| `--prefilter_chain` | `median sobel` | 적용할 전처리 필터의 순서 |
-| `--wavelet_name` | `coif6` | 웨이블릿 종류 (haar, db2, coif6 등) |
+| `--prefilter_chain` | `median sobel` | 적용할 전처리 필터의 순서 (권장: `clahe median sobel`) |
+| `--wavelet_name` | `sym8` | 웨이블릿 종류 (haar, db2, coif6 등) |
 | `--std_factor` | `3.0` | 후보점 추출 임계값 (μ + k*σ) |
 | `--window_hw` | `3` | WTMS 계산 윈도우 반폭 |
 | `--glcm_window_size` | `11` | GLCM 계산 윈도우 크기 |
@@ -218,10 +224,13 @@ pytest tests/ --cov=. --cov-report=html
 
 ### 성능 벤치마크
 ```bash
+# 권장 파이프라인 성능 측정
+python cli.py inspect -i input_img/sample_1_P.bmp --prefilter_chain clahe median sobel
+
 # 기본 파이프라인 성능 측정
 python cli.py inspect -i input_img/sample_1_P.bmp
 
-# GLCM 포함 성능 측정
+# GLCM 포함 성능 측정 (실험적)
 python cli.py inspect -i input_img/sample_1_P.bmp --prefilter_chain median glcm_texture sobel
 ```
 

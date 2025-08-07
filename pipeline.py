@@ -11,7 +11,7 @@ The `run()` function wires together all previously implemented modules:
 3. 2‑level SWT → WTM maps (level‑1, level‑2).
 4. μ+3σ candidate sampling on level‑1 WTM.
 5. WTMS computation on level‑1 & level‑2 for every candidate.
-6. Interscale ratio test (R < 0) → raw defect mask.
+6. Interscale ratio test (R >= threshold (default: 2.0)) → raw defect mask.
 7. Golden‑Set filtering (optional) → cleaned mask.
 8. Post‑processing: connected‑component clustering + defect type.
 9. Save debug images to `results/<timestamp>/debug_img`.
@@ -354,13 +354,18 @@ def run(img_path: str | Path, cfg: PipelineConfig | None = None) -> PipelineResu
     save_image(raw_mask.astype(np.uint8) * 255, debug_path(3, "raw_detect_mask"))
 
     # 7. Golden‑Set filter
-    if cfg.gs_csv is not None and cfg.gs_csv.exists():
-        gs_set = load_gs(cfg.gs_csv)
-        coords_clean = filter_by_gs(coords_after_ratio, gs_set)
-        logger.info(
-            f"After GS filter: {len(coords_clean)} (filtered {len(coords_after_ratio) - len(coords_clean)})"
-        )
+    if cfg.gs_csv is not None:
+        if cfg.gs_csv.exists():
+            gs_set = load_gs(cfg.gs_csv)
+            coords_clean = filter_by_gs(coords_after_ratio, gs_set)
+            logger.info(
+                f"After GS filter: {len(coords_clean)} (filtered {len(coords_after_ratio) - len(coords_clean)})"
+            )
+        else:
+            logger.warning(f"Golden Set file not found: {cfg.gs_csv}, skipping filter")
+            coords_clean = coords_after_ratio
     else:
+        logger.info("Golden Set filtering skipped (not specified)")
         coords_clean = coords_after_ratio
 
     cleaned_mask = np.zeros_like(img_u8, dtype=bool)
